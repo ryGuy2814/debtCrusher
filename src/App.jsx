@@ -33,47 +33,67 @@ let appId = 'default-app-id';
 
 // --- Helper to Init Firebase ---
 const tryInitFirebase = (configStr) => {
+  // 1. Try Environment Variable (This Editor)
   try {
-    const config = typeof configStr === 'string' ? JSON.parse(configStr) : configStr;
-    if (!getAuth(undefined)) { // Check if already initialized to avoid duplicate app errors
-       // This check is tricky in module scope, usually safe to just try/catch
-    }
-  } catch (e) {
-    // console.log("Init check", e);
-  }
-  
-  try {
-    // 1. Try Environment Variable (This Editor)
-    if (!app && typeof __firebase_config !== 'undefined') {
-       app = initializeApp(JSON.parse(__firebase_config));
-       appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-    }
-  } catch(e) {}
-
-  try {
-    // 2. Try Manual Config (Passed in or LocalStorage)
-    if (!app && configStr) {
-      const config = typeof configStr === 'string' ? JSON.parse(configStr) : configStr;
-      app = initializeApp(config, 'debt-crusher-manual'); // Use named app to avoid conflicts
-      appId = 'manual-setup';
+    if (typeof __firebase_config !== 'undefined' && __firebase_config) {
+       // Check if already initialized to avoid duplicate app errors
+       try {
+         app = initializeApp(JSON.parse(__firebase_config));
+         appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+         auth = getAuth(app);
+         db = getFirestore(app);
+         return true;
+       } catch (e) {
+         // App might already exist, try to get instances
+         if (!app) {
+            console.warn("Env init failed, trying recovery", e);
+         }
+       }
     }
   } catch(e) {
-    // If it fails (e.g. duplicate app), try to get existing
-    try {
-      // In some hot-reload envs, app might exist
-    } catch(err) {}
+    // console.log("Environment config not found (expected on Netlify)");
   }
 
-  if (app) {
+  // 2. Try Manual Config (Passed in or LocalStorage)
+  if (!configStr) return false;
+
+  let config = null;
+  try {
+    // Try standard JSON parse
+    config = JSON.parse(configStr);
+  } catch (e) {
+    // Try relaxed parsing (for when keys aren't quoted)
+    try {
+      const relaxedJson = configStr.replace(/(['"])?([a-zA-Z0-9_]+)(['"])?:/g, '"$2": ').replace(/'/g, '"');
+      config = JSON.parse(relaxedJson);
+    } catch (e2) {
+      console.error("Config parsing failed", e2);
+      return false;
+    }
+  }
+
+  if (!config || !config.apiKey) return false;
+
+  try {
+    // Use a unique name if default app exists, or just init
+    app = initializeApp(config, 'debt-crusher-manual-' + Date.now()); 
+    appId = 'manual-setup';
     auth = getAuth(app);
     db = getFirestore(app);
     return true;
+  } catch(e) {
+    console.error("Firebase manual init failed", e);
+    return false;
   }
-  return false;
 };
 
-// Attempt initial load
-tryInitFirebase(localStorage.getItem('debt_crusher_firebase_config'));
+// Attempt initial load from storage
+let initialConfigState = false;
+try {
+  initialConfigState = tryInitFirebase(localStorage.getItem('debt_crusher_firebase_config'));
+} catch(e) {
+  console.error("Fatal init error", e);
+}
 
 
 // --- UI Components ---
@@ -183,7 +203,7 @@ export default function App() {
   const [manualLink, setManualLink] = useState('');
   
   // App Config State
-  const [isConfigured, setIsConfigured] = useState(!!app);
+  const [isConfigured, setIsConfigured] = useState(initialConfigState);
   const [configInput, setConfigInput] = useState('');
   
   // Data State
@@ -286,7 +306,7 @@ export default function App() {
       setIsConfigured(true);
       window.location.reload(); // Reload to ensure clean init
     } else {
-      alert("Invalid Configuration JSON. Please try again.");
+      alert("Invalid Configuration. Please check that you copied the entire code block correctly.");
     }
   };
 
@@ -525,11 +545,9 @@ export default function App() {
             <Button className="w-full justify-center">Join Household</Button>
           </form>
           {/* Show a reset button for config only if not using default env */}
-          {!__firebase_config && (
-            <button onClick={resetConfig} className="text-xs text-slate-400 hover:text-red-500 mt-4 flex items-center gap-1 mx-auto">
-              <Settings size={12} /> Reset Database Config
-            </button>
-          )}
+          <button onClick={resetConfig} className="text-xs text-slate-400 hover:text-red-500 mt-4 flex items-center gap-1 mx-auto">
+            <Settings size={12} /> Reset Database Config
+          </button>
         </Card>
       </div>
     );
