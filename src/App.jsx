@@ -17,84 +17,46 @@ import {
   Copy,
   Smartphone,
   Check,
-  AlertTriangle,
   Link as LinkIcon,
-  Globe,
-  Settings,
-  Database
+  Globe
 } from 'lucide-react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from 'firebase/auth';
 import { getFirestore, doc, onSnapshot, setDoc } from 'firebase/firestore';
 
-// --- Firebase Global Refs ---
+// --- HARDCODED CONFIGURATION (No Setup Screen Needed) ---
+const firebaseConfig = {
+  apiKey: "AIzaSyCJnzX78jVZQiQQzGgzTyqnzkLxnXeQ6Gs",
+  authDomain: "debt-crusher-fdd08.firebaseapp.com",
+  projectId: "debt-crusher-fdd08",
+  storageBucket: "debt-crusher-fdd08.firebasestorage.app",
+  messagingSenderId: "768312858700",
+  appId: "1:768312858700:web:512463fe64e980f774bce9",
+  measurementId: "G-L2GZ2DSWML"
+};
+
+// --- Init Firebase ---
 let app, auth, db;
 let appId = 'default-app-id';
 
-// --- Helper to Init Firebase ---
-const tryInitFirebase = (configStr) => {
-  // 1. Try Environment Variable (This Editor)
-  try {
-    if (typeof __firebase_config !== 'undefined' && __firebase_config) {
-       // Check if already initialized to avoid duplicate app errors
-       try {
-         app = initializeApp(JSON.parse(__firebase_config));
-         appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-         auth = getAuth(app);
-         db = getFirestore(app);
-         return true;
-       } catch (e) {
-         // App might already exist, try to get instances
-         if (!app) {
-            console.warn("Env init failed, trying recovery", e);
-         }
-       }
-    }
-  } catch(e) {
-    // console.log("Environment config not found (expected on Netlify)");
+try {
+  // 1. Try Environment Variable (Preview Mode)
+  if (typeof __firebase_config !== 'undefined' && __firebase_config) {
+     app = initializeApp(JSON.parse(__firebase_config));
+     appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+  } else {
+  // 2. Use Hardcoded Config (Netlify / Mobile)
+     app = initializeApp(firebaseConfig);
+     appId = 'debt-crusher-live';
   }
-
-  // 2. Try Manual Config (Passed in or LocalStorage)
-  if (!configStr) return false;
-
-  let config = null;
-  try {
-    // Try standard JSON parse
-    config = JSON.parse(configStr);
-  } catch (e) {
-    // Try relaxed parsing (for when keys aren't quoted)
-    try {
-      const relaxedJson = configStr.replace(/(['"])?([a-zA-Z0-9_]+)(['"])?:/g, '"$2": ').replace(/'/g, '"');
-      config = JSON.parse(relaxedJson);
-    } catch (e2) {
-      console.error("Config parsing failed", e2);
-      return false;
-    }
-  }
-
-  if (!config || !config.apiKey) return false;
-
-  try {
-    // Use a unique name if default app exists, or just init
-    app = initializeApp(config, 'debt-crusher-manual-' + Date.now()); 
-    appId = 'manual-setup';
+  
+  if (app) {
     auth = getAuth(app);
     db = getFirestore(app);
-    return true;
-  } catch(e) {
-    console.error("Firebase manual init failed", e);
-    return false;
   }
-};
-
-// Attempt initial load from storage
-let initialConfigState = false;
-try {
-  initialConfigState = tryInitFirebase(localStorage.getItem('debt_crusher_firebase_config'));
 } catch(e) {
-  console.error("Fatal init error", e);
+  console.error("Firebase init failed:", e);
 }
-
 
 // --- UI Components ---
 
@@ -200,11 +162,6 @@ export default function App() {
   const [showShareModal, setShowShareModal] = useState(false);
   const [shareUrl, setShareUrl] = useState('');
   const [copySuccess, setCopySuccess] = useState(false);
-  const [manualLink, setManualLink] = useState('');
-  
-  // App Config State
-  const [isConfigured, setIsConfigured] = useState(initialConfigState);
-  const [configInput, setConfigInput] = useState('');
   
   // Data State
   const [data, setData] = useState({
@@ -216,8 +173,7 @@ export default function App() {
 
   // 1. Init Logic
   useEffect(() => {
-    // If we have an app, start auth
-    if (isConfigured && app) {
+    if (app && auth) {
       const initAuth = async () => {
         // Try to auth
         if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
@@ -236,9 +192,9 @@ export default function App() {
       });
       return () => unsubscribe();
     } else {
-      setLoading(false); // Stop loading if we are just waiting for config
+      setLoading(false);
     }
-  }, [isConfigured, isJoined]);
+  }, [isJoined]);
 
   // 2. Data Sync
   useEffect(() => {
@@ -274,19 +230,14 @@ export default function App() {
     });
 
     return () => unsubscribe();
-  }, [user, householdId, isJoined, isConfigured]);
+  }, [user, householdId, isJoined]);
 
   // --- Get URL Effect ---
   useEffect(() => {
     try {
-      const savedLink = localStorage.getItem('debt_crusher_manual_link');
-      if (savedLink) {
-        setShareUrl(savedLink);
-      } else {
-        setShareUrl(window.location.href);
-      }
-    } catch (e) {
       setShareUrl(window.location.href);
+    } catch (e) {
+      // Fallback
     }
   }, []);
 
@@ -297,22 +248,6 @@ export default function App() {
     const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'households', safeId);
     setData(prev => ({ ...prev, ...newData }));
     await setDoc(docRef, { ...data, ...newData }, { merge: true });
-  };
-
-  const handleConfigSubmit = (e) => {
-    e.preventDefault();
-    if (tryInitFirebase(configInput)) {
-      localStorage.setItem('debt_crusher_firebase_config', configInput);
-      setIsConfigured(true);
-      window.location.reload(); // Reload to ensure clean init
-    } else {
-      alert("Invalid Configuration. Please check that you copied the entire code block correctly.");
-    }
-  };
-
-  const resetConfig = () => {
-    localStorage.removeItem('debt_crusher_firebase_config');
-    window.location.reload();
   };
 
   const joinHousehold = (e) => {
@@ -333,21 +268,6 @@ export default function App() {
     setHouseholdId('');
     setIsJoined(false);
     setData({ incomes: [], expenses: [], debts: [], strategy: 'avalanche' });
-  };
-
-  const saveManualLink = () => {
-    if (manualLink && manualLink.startsWith('http')) {
-      localStorage.setItem('debt_crusher_manual_link', manualLink);
-      setShareUrl(manualLink);
-      setManualLink('');
-    } else {
-      alert("Please enter a valid URL starting with http");
-    }
-  };
-
-  const clearManualLink = () => {
-    localStorage.removeItem('debt_crusher_manual_link');
-    setShareUrl(window.location.href);
   };
 
   const copyToClipboard = () => {
@@ -461,13 +381,6 @@ export default function App() {
               <p className="mb-2 font-semibold">Try this workaround:</p>
               <p className="mb-2">Copy the URL from your <strong>browser's address bar</strong> at the very top of the window.</p>
             </div>
-            <div className="pt-2 border-t border-slate-100">
-               <label className="text-xs font-semibold text-slate-500 mb-1 block">Or, paste the link here to save it:</label>
-               <div className="flex gap-2">
-                 <input placeholder="https://..." value={manualLink} onChange={(e) => setManualLink(e.target.value)} className="flex-1 border border-slate-300 rounded px-2 text-sm" />
-                 <Button onClick={saveManualLink} variant="secondary" className="px-3 py-1">Save</Button>
-               </div>
-            </div>
           </div>
         ) : (
           <div>
@@ -476,7 +389,6 @@ export default function App() {
               <input readOnly value={shareUrl} className="flex-1 bg-slate-100 border border-slate-200 rounded-lg px-3 text-sm text-slate-600 focus:outline-none" />
               <Button onClick={copyToClipboard} variant="secondary">{copySuccess ? <Check size={16} className="text-emerald-600" /> : <Copy size={16} />}</Button>
             </div>
-            <div className="mt-2 text-center"><button onClick={clearManualLink} className="text-xs text-slate-400 hover:underline">Reset Link</button></div>
             <div className="mt-4 text-xs text-slate-400">Once opened in Safari on iPhone: Tap "Share" icon → "Add to Home Screen".</div>
           </div>
         )}
@@ -484,45 +396,7 @@ export default function App() {
     </div>
   );
 
-  const renderConfigView = () => (
-    <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
-      <Card className="max-w-md w-full text-center space-y-6">
-        <div className="bg-slate-200 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
-          <Database className="text-slate-500" size={32} />
-        </div>
-        <div>
-          <h1 className="text-2xl font-bold text-slate-800">Setup Database</h1>
-          <p className="text-slate-500 mt-2">To run this app on Netlify or your own host, you need to connect your own Firebase.</p>
-        </div>
-        
-        <div className="text-left bg-slate-50 p-4 rounded-lg border border-slate-200 text-sm text-slate-600 space-y-2">
-          <p>1. Go to <a href="https://console.firebase.google.com" target="_blank" className="text-emerald-600 underline">console.firebase.google.com</a></p>
-          <p>2. Create a project (it's free).</p>
-          <p>3. Go to Project Settings and copy the <code>firebaseConfig</code> JSON object.</p>
-        </div>
-
-        <form onSubmit={handleConfigSubmit} className="text-left space-y-4">
-          <div className="space-y-1">
-            <label className="text-sm font-medium text-slate-700">Firebase Config JSON</label>
-            <textarea 
-              rows={6}
-              value={configInput}
-              onChange={(e) => setConfigInput(e.target.value)}
-              placeholder='{"apiKey": "...", "authDomain": "...", ...}' 
-              className="w-full p-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none font-mono text-xs"
-            />
-          </div>
-          <Button className="w-full justify-center">Save & Connect</Button>
-        </form>
-      </Card>
-    </div>
-  );
-
   // --- Main Render Flow ---
-
-  if (!isConfigured) {
-    return renderConfigView();
-  }
 
   if (!isJoined) {
     return (
@@ -544,10 +418,6 @@ export default function App() {
             </div>
             <Button className="w-full justify-center">Join Household</Button>
           </form>
-          {/* Show a reset button for config only if not using default env */}
-          <button onClick={resetConfig} className="text-xs text-slate-400 hover:text-red-500 mt-4 flex items-center gap-1 mx-auto">
-            <Settings size={12} /> Reset Database Config
-          </button>
         </Card>
       </div>
     );
